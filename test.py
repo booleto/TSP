@@ -66,38 +66,90 @@ class TreeNode:
         self.is_leaf = False
         self.portals = []
         self.children = None
+        self.local_idx = -1
         self.vertex = None
+        self.directions = []
+        self.solutions = []
 
 
     def divide(node):
         """Tạo 4 nút con
         node: nút đang xét
         """
-        node.children = [[TreeNode(), TreeNode()], [TreeNode(), TreeNode()]]
-        for row in node.children:
-            for child in row:
-                child.parent = node
-                child.bbox.bound = node.bbox.bound // 2
-                child.level = node.level + 1
+        node.children = [TreeNode(), TreeNode(), TreeNode(), TreeNode()]
+        for child in node.children:
+            child.parent = node
+            child.bbox.bound = node.bbox.bound // 2
+            child.level = node.level + 1
         
         b, _ = node.bbox.bound // 2
-        node.children[0][0].bbox.pos = node.bbox.pos
-        node.children[0][1].bbox.pos = node.bbox.pos + np.array((0, b))
-        node.children[1][0].bbox.pos = node.bbox.pos + np.array((b, 0))
-        node.children[1][1].bbox.pos = node.bbox.pos + np.array((b, b))
+        node.children[0].bbox.pos = node.bbox.pos
+        node.children[1].bbox.pos = node.bbox.pos + np.array((0, b))
+        node.children[2].bbox.pos = node.bbox.pos + np.array((b, 0))
+        node.children[3].bbox.pos = node.bbox.pos + np.array((b, b))
 
-        for row in node.children:
-            for child in row:
-                child.vertex = node.vertex[[child.bbox.is_inside(m) for m in node.vertex]]
-                if len(child.vertex) == 0:
-                    continue
-                if len(child.vertex) == 1:
-                    child.is_leaf = True
-                    continue
-                TreeNode.divide(child)
+        for child in node.children:
+            child.vertex = node.vertex[[child.bbox.is_inside(m) for m in node.vertex]]
+            if len(child.vertex) == 0:
+                continue
+            if len(child.vertex) == 1:
+                child.is_leaf = True
+                continue
+            TreeNode.divide(child)
+
+        # for i in range(4): # các hướng cần thêm portal
+        #     node.children[i].local_idx = i
+        #     if len(node.children[i].vertex) > 0:
+        #         for j in [idx for idx in range(4) if idx != i]:
+        #             if len(node.children[j].vertex) != 0:
+        #                 node.children[j].directions.append(TreeNode.idx_to_vec(j, i))
+
+        for i in range(4):
+            for j in range(i+1, 4):
+                if len(node.children[i].vertex) > 0 and len(node.children[j].vertex) > 0:
+                    node.children[i].directions.append(TreeNode.idx_to_vec(i, j))
+                    node.children[j].directions.append(TreeNode.idx_to_vec(j, i))
+                
+    
+
+    # def solve_leaf(self, r=2):
+    #     portals = []
+    #     for d1 in len(self.directions) - 1:
+    #         for d2 in range(d1+1, len(self.directions)):
+    #             dir = TreeNode.idx_to_vec(self.directions[d1], self.directions[d2])
+    #             portals.append(TreeNode.calc_portals(self.pos, self.bbox.bound[0], dir, m=2))
+        
+                
 
     
-    # def define_portals(node, m):
+    def calc_portals(pos: np.array, bound: int, dir: np.array, m: int=1):
+        '''Tính toán vị trí các portal
+        '''
+        bound_vec = np.array((bound, bound))
+        corners = np.array(((-1, -1), (1, 1), (-1, 1), (1, -1)))
+        if np.any([np.all(np.equal(corner, dir)) for corner in corners]):
+            bound_vec = (bound_vec + 1) / 2
+            return [pos + bound_vec]
+        
+        m += 1
+        if np.all(np.equal(dir, np.array((0, 1)))): # bên phải
+            return [pos + np.array((a*(bound / m), bound)) for a in range(1, m)]
+        
+        if np.all(np.equal(dir, np.array((1, 0)))): # bên trên            
+            return [pos + np.array((bound, a*(bound/m))) for a in range(1, m)]
+        
+        if np.all(np.equal(dir, np.array((0, -1)))): # bên trái
+            return [pos + np.array((a*(bound / m), 0)) for a in range(1, m)]
+        
+        if np.all(np.equal(dir, np.array((-1, 0)))): # bên dưới
+            return [pos + np.array((0, a*(bound / m))) for a in range(1, m)]
+
+
+    
+    def idx_to_vec(i1 : int, i2 : int):
+        i1v = np.array((i1 // 2, i1 % 2))
+        i2v = np.array(((i2 // 2, i2 % 2)))
+        return i2v - i1v
 
 
     def draw(self, ax):
@@ -105,6 +157,15 @@ class TreeNode:
         ax: Matplotlib axes
         """
         self.bbox.draw(ax)
+        center = self.bbox.center()
+        bound = self.bbox.bound[0]
+        for dir in self.directions:
+            # pos = center + dir * (bound / 2)
+            pointlist = np.array(TreeNode.calc_portals(self.bbox.pos, bound, dir, m=2))
+            print(pointlist)
+            # plt.scatter(pos[0], pos[1], marker='x', c='r')
+            plt.scatter(pointlist[:, 0], pointlist[:, 1], marker='x', c='r')
+            # ax.annotate(self.bbox.pos, (pos[0], pos[1]))
 
         if self.is_leaf:
             for i in range(len(self.vertex)):
@@ -114,9 +175,9 @@ class TreeNode:
 
         if self.children == None:
             return
-        for row in self.children:
-            for child in row:
-                child.draw(ax)
+        for child in self.children:
+            child.draw(ax)
+
 
 
 class BBox:
@@ -136,6 +197,9 @@ class BBox:
         p: Tọa độ điểm cần kiểm tra
         """
         return np.all(self.pos < p) and np.all(p <= self.pos + self.bound)
+    
+    def center(self) -> np.ndarray:
+        return (self.pos + self.bound / 2)
     
     def draw(self, ax):
         """Vẽ HCN
@@ -168,24 +232,12 @@ def pertub(nodes, epsilon, d):
     return np.unique(scaled_nodes, axis=0) * 2 + 1
 
 
-# def pertub(nodes, L_0, c):
-#     '''Làm tròn tọa độ các nút để độ phức tạp của quadtree là nlog(n), rồi khử các nút trùng vị trí
-
-#     nodes: danh sách các nút
-#     L_0: độ dài cạnh hình vuông bao quanh mọi nút
-#     epsilon: tham số. epsilon > 1/(len(nodes) ** (1/3))
-#     d: độ dài max giữa 2 nút
-
-#     Trả về: danh sách nút, sắp xếp tăng dần theo node[0, :]
-#     '''
-#     scaled_nodes = np.round(nodes / (L_0/(8*len(nodes)*c))) * 8
-#     return np.unique(scaled_nodes, axis=0) + 1
-
-
+# quadtree demo
 epsilon = 0.5
-L_0 = 256
+L_0 = 16
 d = L_0
-N = 160
+N = 20
+r = 2
 
 nodes = createNodes(N=N, scale=L_0)
 pnodes = pertub(nodes, epsilon, L_0 * np.sqrt(2))
@@ -200,24 +252,14 @@ qtree.bound = next_2power(np.max(pnodes))
 qtree.build_tree()
 qtree.draw(figsize=(8, 8))
 
-# print((L_0/(8*N*c)))
-
-    
-# a = np.array([[0, 1], [2, 3], [4, 5], [6, 7], [7, 8], [8, 9]])
-# bb = BBox()
-# bb.pos = np.array((0,0))
-# bb.bound = np.array((2,2))
-# print(bb.is_inside(a[1]))
-
-# p1 = np.array((0, 1))
-# p2 = np.array((4, 5))
-
-
-# print([a.all(p1 < a)])
 
 
 
+# i1 = 1
+# i2 = 2
+# i1v = np.array((i1 // 2, i1 % 2))
+# i2v = np.array(((i2 // 2, i2 % 2)))
+# print(i1v - i2v)
 
-
-
+# print(TreeNode.idx_to_vec(2, 1))
 
