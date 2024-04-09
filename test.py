@@ -4,9 +4,11 @@ from numba import njit, prange
 
 np.random.seed(42)  # Đảm bảo kết quả nhất quán
 
+
 def createNodes(N, scale=100):
     """Tạo nút ngẫu nhiên"""
     return np.random.rand(N, 2) * scale
+
 
 class AroraQuadTree:
     """Quadtree được sử dụng trong Arora PTAS
@@ -23,6 +25,15 @@ class AroraQuadTree:
         self.root : TreeNode = TreeNode()
         self.levels = 0
         self.bound = 0
+
+    
+    # def solve_tree(self):
+    #     node = self.root
+    #     for child in self.children:
+    #         if len(child.vertex) == 0:
+    #             continue
+    #         if len(child)
+            
 
 
     def build_tree(self):
@@ -56,7 +67,8 @@ class TreeNode:
 
     bbox: HCN bao quanh
     vertex: Các điểm nằm trong bbox
-    portals:
+    portals: Các portal nằm trên ô
+    
     """
     def __init__(self, box=(0,0,0,0)) -> None:
         self.level = 0
@@ -66,10 +78,12 @@ class TreeNode:
         self.bbox = BBox(box)
         self.is_leaf = False
         self.portals = np.array([]).reshape((0, 2))
+        self.portal_cache = {}
         self.local_idx = -1
-        self.vertex = None
+        self.vertex = []
         self.directions = []
         self.solutions = {}
+        self.m = 1
 
 
     def divide(node):
@@ -81,6 +95,7 @@ class TreeNode:
             child.parent = node
             child.bbox.bound = node.bbox.bound // 2
             child.level = node.level + 1
+            child.m = node.m
         
         b, _ = node.bbox.bound // 2
         node.children[0].bbox.pos = node.bbox.pos
@@ -92,7 +107,7 @@ class TreeNode:
             node.children[i].local_idx = i
 
         for child in node.children:
-            child.vertex = node.vertex[[child.bbox.is_inside(m) for m in node.vertex]]
+            child.vertex = node.vertex[[child.bbox.is_inside(v) for v in node.vertex]]
             if len(child.vertex) == 0:
                 continue
             if len(child.vertex) == 1:
@@ -106,7 +121,7 @@ class TreeNode:
                     dir = TreeNode.idx_to_vec(i1, i2)
                     node.children[i1].directions.append(dir)
                     node.children[i2].directions.append(- dir)
-                    portals = TreeNode.calc_portals(node.children[i1].bbox.pos, node.children[i1].bbox.bound[0], dir, m=2)
+                    portals = node.children[i1].calc_portals(dir, m=node.m)
                     # print(f"portals: {portals}")
                     # print(f"node portals: {node.children[i].portals}")
 
@@ -117,38 +132,180 @@ class TreeNode:
             
         
 
-    def calc_portals(pos: np.array, bound: int, dir: np.array, m: int=1):
+    def calc_portals(self, dir: np.array, m: int=1):
         '''Tính toán vị trí các portal
         '''
+        if dir.tobytes() in self.portal_cache:
+            return self.portal_cache[dir.tobytes()]
+
+        bound = self.bbox.bound[0]
+        pos = self.bbox.pos
         bound_vec = np.array((bound, bound))
         corners = np.array(((-1, -1), (1, 1), (-1, 1), (1, -1))) # trong góc
         if np.any([np.all(np.equal(corner, dir)) for corner in corners]):
             dir = (dir + 1) / 2
-            return [pos + np.multiply(bound_vec, dir)]
+            ret = [pos + np.multiply(bound_vec, dir)]
+            self.portal_cache[dir.tobytes()] = ret
+            return ret
         
         m += 1
         if np.array_equiv(dir, np.array((0, 1))): # bên phải
-            return [pos + np.array((a*(bound / m), bound)) for a in range(1, m)]
+            ret = [pos + np.array((a*(bound / m), bound)) for a in range(1, m)]
+            self.portal_cache[dir.tobytes()] = ret
+            return ret
         
-        if np.array_equiv(dir, np.array((1, 0))): # bên trên            
-            return [pos + np.array((bound, a*(bound/m))) for a in range(1, m)]
+        if np.array_equiv(dir, np.array((1, 0))): # bên trên
+            ret = [pos + np.array((bound, a*(bound/m))) for a in range(1, m)]
+            self.portal_cache[dir.tobytes()] = ret
+            return ret
         
         if np.array_equiv(dir, np.array((0, -1))): # bên trái
-            return [pos + np.array((a*(bound / m), 0)) for a in range(1, m)]
+            ret = [pos + np.array((a*(bound / m), 0)) for a in range(1, m)]
+            self.portal_cache[dir.tobytes()] = ret 
+            return ret
         
         if np.array_equiv(dir, np.array((-1, 0))): # bên dưới
-            return [pos + np.array((0, a*(bound / m))) for a in range(1, m)]
+            ret = [pos + np.array((0, a*(bound / m))) for a in range(1, m)]
+            self.portal_cache[dir.tobytes()] = ret
+            return ret
 
 
     
     def idx_to_vec(i1 : int, i2 : int):
+        """Tính vector đi từ local index i1 đến i2
+        i1 và i2 cần có chung node mẹ
+
+        i1: int, local index
+        i2: int, local index
+        """
         i1v = np.array((i1 // 2, i1 % 2))
         i2v = np.array(((i2 // 2, i2 % 2)))
         return i2v - i1v
     
 
-    # def solve_subproblem(self, ins, out):
+    def solve_leaf(self, ins, out):
+        if len(self.vertex) == 1:
+            cost = np.linalg.norm(ins - self.vertex[0]) + np.linalg.norm(self.vertex[0] - out)
+            # plt.plot((ins[0], self.vertex[0][0]), (ins[1], self.vertex[0][1]), color='g', alpha=1)
+            # plt.plot((out[0], self.vertex[0][0]), (out[1], self.vertex[0][1]), color='g', alpha=1)
+            return (cost, [self.vertex[0]])
+        else:
+            # plt.plot((ins[0], out[0]), (ins[1], out[1]), color='g', alpha=1)
+            return (np.linalg.norm(ins - out), [])
 
+
+    def solve_subproblem(self, ins, out):
+        key = np.concatenate((ins, out)).tobytes()
+        if key in self.solutions:
+            return self.solutions[key]
+
+        if len(self.vertex) <= 1:
+            return self.solve_leaf(ins, out)
+
+        starts = []
+        ends = []
+        travel_order = []
+        min_path = 0
+        for child in self.children:
+            # if len(child.vertex) == 0:
+            #     continue
+            if child.bbox.is_inside_inclusive(ins):
+                starts.append(child)
+            if child.bbox.is_inside_inclusive(out):
+                ends.append(child)
+            if len(child.vertex) != 0:
+                min_path += 1
+        
+
+        queue = [([st], 1) if len(st.vertex) != 0 else ([st], 0) for st in starts]
+
+        # tìm các đường đi khả thi
+        while queue:
+            current_path, node_count = queue.pop()
+            print(f"path: {[node.bbox.pos for node in current_path]}")
+            print(f"count: {node_count}")
+            next_poss = [child for child in self.children if child not in current_path]
+
+            for nextp in next_poss:
+                if nextp in ends:
+                    print(f"end: {nextp.bbox.pos}")
+                    if node_count == min_path or (node_count == min_path-1 and len(nextp.vertex) != 0):
+                        current_path.append(nextp)
+                        travel_order.append(current_path)
+                        continue
+
+                if len(current_path) < 4:
+                    next_count = node_count
+                    if len(nextp.vertex) != 0:
+                        next_count += 1
+                    queue.append((current_path + [nextp], next_count))
+            print("-----------------------------")
+
+        # print(f"travel order: {[[node.bbox.pos for node in tour] for tour in travel_order]}")
+
+        # for tour in travel_order:
+        #     print(f"tour: {[node.bbox.pos for node in tour]}")
+
+    
+        # while queue:
+        #     current_path = queue.pop()
+        #     next_poss = current_path[-1].neighbors
+        #     for nextp in next_poss:
+        #         if nextp in ends and len(current_path) == min_path-1 and nextp not in current_path:
+        #             current_path.append(nextp)
+        #             travel_order.append(current_path)
+        #         if nextp not in current_path and len(current_path) < 4:
+        #             queue.append(current_path + [nextp])
+        # else:
+        #     while queue:
+        #         current_path = queue.pop()
+        #         next_poss = current_path[-1].neighbors
+        #         for nextp in next_poss:
+        #             if len(current_path) == min_path-1 and nextp not in current_path:
+        #                 current_path.append(nextp)
+        #                 travel_order.append(current_path)
+        #             if nextp not in current_path:
+        #                 queue.append(current_path + [nextp])
+
+        
+        min_tour = None # tìm đường đi tốt nhất
+        min_tour_cost = np.iinfo(np.int64).max # Max value
+        for order in travel_order:
+            print(f"node order: {[node.vertex for node in order]}")
+            portal_tours = TreeNode.get_portal_tour(order, ins, out)
+            
+            for t, port_tour in enumerate(portal_tours):
+                tour_cost = 0
+                current_tour = []
+
+                for i, node in enumerate(order):    
+                    cost, subtour = node.solve_subproblem(port_tour[i], port_tour[i+1])
+                    tour_cost += cost
+                    current_tour = current_tour + subtour
+                
+                if tour_cost < min_tour_cost:
+                    min_tour_cost = tour_cost
+                    min_tour = current_tour
+        
+        key = np.concatenate((ins, out)).tobytes()
+        self.solutions[key] = (min_tour_cost, min_tour)
+        return (min_tour_cost, min_tour)
+
+    
+    def get_portal_tour(path, ins, out):
+        """Tính danh sách các portal có thể đi qua
+        path: các node cần đi qua (theo thứ tự)
+        ins: portal khởi đầu
+        out: portal kết thúc
+        """
+        viable_paths = np.array(ins)
+        for i in range(len(path) - 1):
+            dir = TreeNode.idx_to_vec(path[i].local_idx, path[i+1].local_idx)
+            ports = path[i].calc_portals(dir, m=path[i].m)
+            viable_paths = add_to_path(viable_paths, np.array(ports))
+        viable_paths = add_to_path(viable_paths, np.array(out))
+
+        return viable_paths
 
 
     def draw(self, ax):
@@ -162,7 +319,8 @@ class TreeNode:
         if self.is_leaf: # vẽ các điểm
             for i in range(len(self.vertex)):
                 plt.scatter(self.vertex[i, 0], self.vertex[i, 1], color='b')
-                ax.annotate(self.level, (self.vertex[i, 0], self.vertex[i, 1]))
+                # ax.annotate(self.level, (self.vertex[i, 0], self.vertex[i, 1]))
+                ax.annotate(f"{(self.vertex[i, 0], self.vertex[i, 1])}", (self.vertex[i, 0], self.vertex[i, 1]))
             return
 
         if self.children == None:
@@ -275,47 +433,40 @@ def pertub(nodes, epsilon, d):
 
 
 
-ins = np.array((0, 3))
-outs = np.array((4, 1))
+# def solve_subproblem(tnode: TreeNode, ins, out):
+#     paths = [[ins]]
+#     solution = None
 
-tnode = TreeNode(box=(0, 0, 4, 4))
-nodes = np.array(((1, 3), (3, 3), (3, 1)))
-tnode.vertex = nodes
-tnode.divide()
-
-
-
-def solve_subproblem(tnode: TreeNode, ins, out):
-    paths = [[ins]]
-    solution = None
-
-    starts = []
-    ends = []
-    travel_order = []
-    min_path = 0
-    for child in tnode.children:
-        if len(child.vertex) == 0:
-            continue
-        if child.bbox.is_inside_inclusive(ins):
-            starts.append(child)
-        if child.bbox.is_inside_inclusive(out):
-            ends.append(child)
-        min_path += 1
+#     starts = []
+#     ends = []
+#     travel_order = []
+#     min_path = 0
+#     for child in tnode.children:
+#         if len(child.vertex) == 0:
+#             continue
+#         if child.bbox.is_inside_inclusive(ins):
+#             starts.append(child)
+#         if child.bbox.is_inside_inclusive(out):
+#             ends.append(child)
+#         min_path += 1
     
-    queue = [[st] for st in starts]
+#     queue = [[st] for st in starts]
 
-    while queue:
-        current_path = queue.pop()
-        next_poss = current_path[-1].neighbors
-        for nextp in next_poss:
-            if nextp in ends and len(current_path) == min_path-1 and nextp not in current_path:
-                current_path.append(nextp)
-                travel_order.append(current_path)
-            if nextp not in current_path:
-                queue.append(current_path + [nextp])
+#     while queue:
+#         current_path = queue.pop()
+#         next_poss = current_path[-1].neighbors
+#         for nextp in next_poss:
+#             if nextp in ends and len(current_path) == min_path-1 and nextp not in current_path:
+#                 current_path.append(nextp)
+#                 travel_order.append(current_path)
+#             if nextp not in current_path:
+#                 queue.append(current_path + [nextp])
 
-    return travel_order
+#     return travel_order
+
     
+
+
     # for order in travel_order:
     #     viable_paths = [np.array(ins)]
     #     for i in range(len(order) - 1):
@@ -327,19 +478,22 @@ def solve_subproblem(tnode: TreeNode, ins, out):
     #     print(viable_paths)
 
 
-def solve_paths(path, ins, out):
-    viable_paths = np.array(ins)
-    for i in range(len(path) - 1):
-        dir = TreeNode.idx_to_vec(path[i].local_idx, path[i+1].local_idx)
-        ports = TreeNode.calc_portals(path[i].bbox.pos, path[i].bbox.bound[0], dir, m=1)
-        viable_paths = add_to_path(viable_paths, np.array(ports))
-    viable_paths = add_to_path(viable_paths, np.array(out))
 
-        
-    #     viable_paths = add_to_path(viable_paths, np.array(ports))
 
-    # viable_paths = add_to_path(viable_paths, out)
-    return viable_paths
+# def get_portal_tour(path, ins, out):
+#     """Tính danh sách các portal có thể đi qua
+#     path: các node cần đi qua (theo thứ tự)
+#     ins: portal khởi đầu
+#     out: portal kết thúc
+#     """
+#     viable_paths = np.array(ins)
+#     for i in range(len(path) - 1):
+#         dir = TreeNode.idx_to_vec(path[i].local_idx, path[i+1].local_idx)
+#         ports = TreeNode.calc_portals(path[i].bbox.pos, path[i].bbox.bound[0], dir, m=1)
+#         viable_paths = add_to_path(viable_paths, np.array(ports))
+#     viable_paths = add_to_path(viable_paths, np.array(out))
+
+#     return viable_paths
 
 
 path = np.array([[(0, 1), (0, 2)], [(1, 1), (1, 2)]])
@@ -349,43 +503,86 @@ temppath = np.empty(0)
 npath = []
 
 def add_to_path(pathlist : np.ndarray, next : np.ndarray):
+    """Thêm các nút (hoặc portal) vào đường đi
+    pathlist: các đường đi hiện có
+    next: các điểm có thể đến tiếp theo
+    """
     npath = []
+    # print(f"pathlist: {pathlist}")
+    # print(f"next: {next}")
 
     if len(pathlist.shape) == 1:
         if len(next.shape) == 1:
-            npath.append(pathlist, next.reshape(1, 2), axis=0)
-            return npath
+            npath.append(np.concatenate((pathlist.reshape(1, 2), next.reshape(1, 2)), axis=0))
+            return np.array(npath)
 
         for n in next[:, :]:
-            npath.append
+            npath.append(np.concatenate((pathlist.reshape(1, 2), n.reshape(1, 2)), axis=0))
+            return np.array(npath)
         
     if len(next.shape) == 1:
         for p in pathlist[:, :]:
             npath.append(np.concatenate((p, next.reshape(1, 2)), axis=0))
-        return npath
+        return np.array(npath)
 
     for p in pathlist[:, :]:
         for n in next[:, :]:
             npath.append(np.concatenate((p, n.reshape(1, 2)), axis=0))
-    return npath
+    return np.array(npath)
 
-# def add_to_path(pathlist : np.ndarray, next : np.ndarray):
-#     npath = []
-#     for p in pathlist:
-#         for n in next:
-#             npath.append(np.concatenate((p, n), axis=0))
-#     return np.array(npath)
 
+
+ins = np.array((0, 16))
+outs = np.array((12, 0))
+
+tnode = TreeNode(box=(0, 0, 16, 16))
+# nodes = np.array(((1.1, 3.1), (3.1, 2.6), (3.1, 1.1), (1.1, 1.4), (1.1, 1.1)))
+nodes = np.array(((3, 1), (3, 3), (9, 3), (1, 3), (5, 7)))
+tnode.vertex = nodes
+tnode.divide()
+
+
+fig, ax = plt.subplots(figsize=(7, 7))
+tnode.draw(ax)
+plt.scatter(ins[0], ins[1], c='g', marker='x', s=1000, linewidths=5)
+plt.scatter(outs[0], outs[1], c='g', marker='x', s=1000, linewidths=5)
+# plt.show()
 
 # path = add_to_path(path, next)
 # print(path)
 
-travel_order = solve_subproblem(tnode, ins, outs)
+cost, tour = tnode.solve_subproblem(ins, outs)
+print(f"cost: {cost}")
+print(f"tour: {tour}")
+# plt.show()
 
-print(travel_order[0])
+# def plot_tour(tour, porttour):
+#     plt.plot((porttour[0][0], tour[0][0]), (porttour[0][1], tour[0][1]), color='b')
+#     for i in range(len(tour) - 1):
+#         plt.plot((porttour[i*2][0], tour[i][0]), (porttour[i*2][1], tour[0][1]), color='b')
+#         plt.plot((porttour[i*2 + 1][0], tour[i][0]), (porttour[i*2 + 1][1], tour[i][1]), color='b')
+#         # plt.plot((tour[i][0], tour[i+1][0]), (tour[i][1], tour[i + 1][1]), color='b')
 
-ret = solve_paths(travel_order[0], ins, outs)
-print(ret)
+#     plt.plot((porttour[-2][0], tour[-1][0]), (porttour[-1][1], tour[-1][1]), color='b')
+#     plt.show()
+
+plt.plot((ins[0], tour[0][0]), (ins[1], tour[0][1]), color='b')
+for i in range(len(tour) - 1):
+    plt.plot((tour[i][0], tour[i+1][0]), (tour[i][1], tour[i + 1][1]), color='b')
+plt.plot((tour[-1][0], outs[0]), (tour[-1][1], outs[1]), color='b')
+plt.show()
+
+# for i in range(len(tour)):
+#     for j in range(len(tour[i])):
+#         print(tour[i][j][0])
+#         plt.plot((tour[i][j][0], tour[i][j][0]), (tour[i][j][1], tour[i][j][1]), color='b')
+
+
+
+# plot_tour(tour, porttour)
+# for order in travel_order:
+#     ret = get_portal_tour(order, ins, outs)
+#     print(ret)
 
 
 # i am slowly losing it
