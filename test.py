@@ -27,15 +27,6 @@ class AroraQuadTree:
         self.bound = 0
 
     
-    # def solve_tree(self):
-    #     node = self.root
-    #     for child in self.children:
-    #         if len(child.vertex) == 0:
-    #             continue
-    #         if len(child)
-            
-
-
     def build_tree(self):
         """Dựng quadtree, dựa trên nodes
         Cần phải nhập nodes và bounds trước khi gọi hàm này
@@ -46,6 +37,61 @@ class AroraQuadTree:
         self.root.vertex = self.nodes
         self.root.bbox.bound = np.array((self.bound, self.bound))
         TreeNode.divide(self.root)
+
+    
+    def solve_tree(self):
+        node = self.root
+        tour_length = 0
+        tour_choices = []
+        for child in node.children:
+            if len(child.vertex) == 0:
+                continue
+            tour_length += 1
+            tour_choices.append(child)
+
+        queue = [([tour_choices[0]], 1)]
+        travel_order = []
+        # tìm các đường đi khả thi
+        while queue:
+            current_path, node_count = queue.pop()
+            # print(f"path: {[node.bbox.pos for node in current_path]}")
+            # print(f"count: {node_count}")
+            next_poss = [child for child in tour_choices if child is not current_path[-1]]
+
+            for nextp in next_poss:
+                if nextp is tour_choices[0]:
+                    print(f"path: {[node.bbox.pos for node in current_path]}")
+                    if node_count == tour_length or (node_count == tour_length-1 and len(nextp.vertex) != 0):
+                        current_path.append(nextp)
+                        travel_order.append(current_path)
+                        continue
+
+                if len(current_path) < 4:
+                    next_count = node_count
+                    if len(nextp.vertex) != 0:
+                        next_count += 1
+                    queue.append((current_path + [nextp], next_count))
+        
+
+        min_tour = None # tìm đường đi tốt nhất
+        min_tour_cost = np.iinfo(np.int64).max # Max value
+        for order in travel_order:
+            portal_tours = TreeNode.get_inner_portal_tour(order)
+            
+            for t, port_tour in enumerate(portal_tours):
+                tour_cost = 0
+                current_tour = []
+
+                for i, node in enumerate(order):    
+                    cost, subtour = node.solve_subproblem(port_tour[i-1], port_tour[i])
+                    tour_cost += cost
+                    current_tour = current_tour + subtour
+                
+                if tour_cost < min_tour_cost:
+                    min_tour_cost = tour_cost
+                    min_tour = current_tour
+        
+        return (min_tour_cost, min_tour)
 
 
     def draw(self, figsize=(10, 10)):
@@ -307,6 +353,18 @@ class TreeNode:
 
         return viable_paths
 
+    
+    def get_inner_portal_tour(path):
+        assert len(path) > 1
+        dir = TreeNode.idx_to_vec(path[0].local_idx, path[1].local_idx)
+        viable_paths = np.array(path[0].calc_portals(dir, m=path[0].m))
+        for i in range(len(path) - 1):
+            dir = TreeNode.idx_to_vec(path[i].local_idx, path[i+1].local_idx)
+            ports = path[i].calc_portals(dir, m=path[i].m)
+            viable_paths = add_to_path(viable_paths, np.array(ports))
+
+        return viable_paths
+
 
     def draw(self, ax):
         """Vẽ bbox và vertex. Làm tương tự với các nút con
@@ -529,6 +587,7 @@ def add_to_path(pathlist : np.ndarray, next : np.ndarray):
         for n in next[:, :]:
             npath.append(np.concatenate((p, n.reshape(1, 2)), axis=0))
     return np.array(npath)
+    
 
 
 
@@ -536,7 +595,6 @@ ins = np.array((0, 16))
 outs = np.array((12, 0))
 
 tnode = TreeNode(box=(0, 0, 16, 16))
-# nodes = np.array(((1.1, 3.1), (3.1, 2.6), (3.1, 1.1), (1.1, 1.4), (1.1, 1.1)))
 nodes = np.array(((3, 1), (3, 3), (9, 3), (1, 3), (5, 7)))
 tnode.vertex = nodes
 tnode.divide()
@@ -548,23 +606,10 @@ plt.scatter(ins[0], ins[1], c='g', marker='x', s=1000, linewidths=5)
 plt.scatter(outs[0], outs[1], c='g', marker='x', s=1000, linewidths=5)
 # plt.show()
 
-# path = add_to_path(path, next)
-# print(path)
-
 cost, tour = tnode.solve_subproblem(ins, outs)
-print(f"cost: {cost}")
-print(f"tour: {tour}")
-# plt.show()
+# print(f"cost: {cost}")
+# print(f"tour: {tour}")
 
-# def plot_tour(tour, porttour):
-#     plt.plot((porttour[0][0], tour[0][0]), (porttour[0][1], tour[0][1]), color='b')
-#     for i in range(len(tour) - 1):
-#         plt.plot((porttour[i*2][0], tour[i][0]), (porttour[i*2][1], tour[0][1]), color='b')
-#         plt.plot((porttour[i*2 + 1][0], tour[i][0]), (porttour[i*2 + 1][1], tour[i][1]), color='b')
-#         # plt.plot((tour[i][0], tour[i+1][0]), (tour[i][1], tour[i + 1][1]), color='b')
-
-#     plt.plot((porttour[-2][0], tour[-1][0]), (porttour[-1][1], tour[-1][1]), color='b')
-#     plt.show()
 
 plt.plot((ins[0], tour[0][0]), (ins[1], tour[0][1]), color='b')
 for i in range(len(tour) - 1):
@@ -572,20 +617,19 @@ for i in range(len(tour) - 1):
 plt.plot((tour[-1][0], outs[0]), (tour[-1][1], outs[1]), color='b')
 plt.show()
 
-# for i in range(len(tour)):
-#     for j in range(len(tour[i])):
-#         print(tour[i][j][0])
-#         plt.plot((tour[i][j][0], tour[i][j][0]), (tour[i][j][1], tour[i][j][1]), color='b')
 
+# tree = AroraQuadTree()
+# tree.bound = 16
+# tree.nodes = np.array(((3, 1), (3, 3), (9, 3), (1, 3), (5, 7)))
+# tree.build_tree()
 
+# sol = tree.solve_tree()
 
-# plot_tour(tour, porttour)
-# for order in travel_order:
-#     ret = get_portal_tour(order, ins, outs)
-#     print(ret)
+# print(sol)
 
 
 # i am slowly losing it
+# dedge
 
 # torder = solve_subproblem(tnode=tnode, ins=ins, out=outs)
 
