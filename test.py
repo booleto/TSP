@@ -2,7 +2,6 @@ import numpy as np
 import matplotlib.pyplot as plt
 from numba import njit, prange
 
-np.random.seed(42)  # Đảm bảo kết quả nhất quán
 
 
 def createNodes(N, scale=100):
@@ -232,11 +231,11 @@ class TreeNode:
     def solve_leaf(self, ins, out):
         if len(self.vertex) == 1:
             cost = np.linalg.norm(ins - self.vertex[0]) + np.linalg.norm(self.vertex[0] - out)
-            # plt.plot((ins[0], self.vertex[0][0]), (ins[1], self.vertex[0][1]), color='g', alpha=1)
-            # plt.plot((out[0], self.vertex[0][0]), (out[1], self.vertex[0][1]), color='g', alpha=1)
+            plt.plot((ins[0], self.vertex[0][0]), (ins[1], self.vertex[0][1]), color='g', alpha=0.1)
+            plt.plot((out[0], self.vertex[0][0]), (out[1], self.vertex[0][1]), color='g', alpha=0.1)
             return (cost, [self.vertex[0]])
         else:
-            # plt.plot((ins[0], out[0]), (ins[1], out[1]), color='g', alpha=1)
+            plt.plot((ins[0], out[0]), (ins[1], out[1]), color='g', alpha=0.2)
             return (np.linalg.norm(ins - out), [])
 
 
@@ -326,6 +325,8 @@ class TreeNode:
 
                 for i, node in enumerate(order):    
                     cost, subtour = node.solve_subproblem(port_tour[i], port_tour[i+1])
+                    # if subtour == None:
+                    #     continue
                     tour_cost += cost
                     current_tour = current_tour + subtour
                 
@@ -378,7 +379,7 @@ class TreeNode:
             for i in range(len(self.vertex)):
                 plt.scatter(self.vertex[i, 0], self.vertex[i, 1], color='b')
                 # ax.annotate(self.level, (self.vertex[i, 0], self.vertex[i, 1]))
-                ax.annotate(f"{(self.vertex[i, 0], self.vertex[i, 1])}", (self.vertex[i, 0], self.vertex[i, 1]))
+                # ax.annotate(f"{(self.vertex[i, 0], self.vertex[i, 1])}", (self.vertex[i, 0], self.vertex[i, 1]))
             return
 
         if self.children == None:
@@ -590,12 +591,19 @@ def add_to_path(pathlist : np.ndarray, next : np.ndarray):
     
 
 
+np.random.seed(3934)  # Đảm bảo kết quả nhất quán
 
-ins = np.array((0, 16))
-outs = np.array((12, 0))
+ins = np.array((0, 2048))
+outs = np.array((0, 2048))
 
-tnode = TreeNode(box=(0, 0, 16, 16))
-nodes = np.array(((3, 1), (3, 3), (9, 3), (1, 3), (5, 7)))
+# nodes = np.array(((3, 1), (3, 3), (9, 3), (1, 3), (5, 7), (11, 7), (7, 5), (11, 15), (9, 9), (3, 13), (3, 11), (13, 15), (15, 13), (7, 7)))
+nodes = createNodes(40, 64)
+nodes = pertub(nodes, 3, 5)
+nodes += np.array((1000, 1100))
+bound = np.max(nodes)
+bound = next_2power(bound)
+tnode = TreeNode(box=(0, 0, bound, bound))
+
 tnode.vertex = nodes
 tnode.divide()
 
