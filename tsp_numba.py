@@ -193,7 +193,7 @@ def build_tree(tree, node_idx, aabb, vertices, vertices_idx):
 # vert_idx = np.array(range(len(vertices)))
 # bound = search_next_power(np.max(vertices), 2)
 # build_tree(tree, 0, (0, 0, bound), vertices, vert_idx)
-# print(tree)
+# print(tree[:4**3])
 
 
 ##################################################################
@@ -209,16 +209,71 @@ def get_portals(portallist, square):
     return ret.reshape((length, np.int32(2)))
 
 
-portallist = np.array(((1, 1, 2, NULL, NULL), (2, 3, 4, 5, 6)))
-port = get_portals(portallist, 0)
-port[0, 1] = 0
-print(portallist)
-print(get_portals(portallist, 0))
+portallist = np.array(((1, 3, 4, NULL, NULL), (2, 3, 4, 5, 6)))
+# port = get_portals(portallist, 0)
+# port[0, 1] = 0
+# print(portallist)
+# print(get_portals(portallist, 0))
+
+
+# from numba.typed import Sets
 
 # @njit
 # def get_common_portals(portallist, square1, square2):
+#     s1_ports = get_portals(portallist, square1)
+#     s2_ports = get_portals(portallist, square2)
+#     s1_set = set(s1_ports)
+#     s2_set = set(s2_ports)
+#     # s2_ports = ((s2_ports[i][0], s2_ports[i][1]) for i in range(len(s2_ports)))
+
+#     intersect = np.array(s1_set & s2_set)
+
+#     return intersect
+
+# print(get_common_portals(portallist, 0, 1))
 
 
+# def intersect2D(a, b):
+#     return np.array([x for x in set(tuple(x) for x in a) & set(tuple(x) for x in b)])
+
+# @njit
+# def intersect2D(set1, set2):
+#     mask = np.array([False for i in set1], dtype=np.bool_)
+#     for i, elem in enumerate(set1):
+#         if elem in set2:
+#             mask[i] = True  
+
+#     return np.where(mask, set1)
+
+
+def intersect2D(set1, set2):
+
+
+# def is_masks_compatible(portallist, s1, s2, s1_mask, s2_mask):
+#     return True
+
+s1 = np.array(((1, 0), (1, 1), (0, 1)))
+s2 = np.array(((1, 0), (1, 1), (1, 2)))
+print(intersect2D(s1, s2))
+
+
+
+@njit
+def get_subset(index, num_elements):
+    index *= 3
+    subset = np.zeros(num_elements, dtype=np.bool_)
+    for j in range(num_elements):
+        if (index >> j) & 1:
+            subset[j] = True
+    return subset
+
+
+@njit
+def count_subset(num_elements):
+    count = 0
+    while not np.all(get_subset(count, num_elements)):
+       count += 1
+    return count
 
 
 
@@ -248,10 +303,6 @@ def narayana(n, k):
     return int(nCk(n, k) * nCk(n, k-1) / n)
 
 
-
-# print(factorial(2))
-# print(narayana(6, 3))
-
 @njit
 def calc_subproblem_space(max_portal_count : int):
     ret = 0
@@ -259,7 +310,7 @@ def calc_subproblem_space(max_portal_count : int):
         ret += narayana(max_portal_count, i)
     return int(ret)
 
-# print(calc_subproblem_space(6))
+print(calc_subproblem_space(6))
 
     
 
