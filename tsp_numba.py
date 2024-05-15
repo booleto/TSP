@@ -3,22 +3,22 @@ import numpy as np
 
 np.random.seed(1707)
 
-##################################################################
-### GLOBALS ###
+# ---------------------------------------------------------------------------- #
+#                                    GLOBALS                                   #
+# ---------------------------------------------------------------------------- #
 
-### DEBUG ###
+# ----------------------------------- DEBUG ---------------------------------- #
 DEBUG = False
 
-### TRUTH ###
+# ----------------------------------- TRUTH ---------------------------------- #
 FALSE = 0
 TRUE = 1
 NULL = -1
 
-### POINTS ###
-POSITION = np.array((0, 1))
 
-##################################################################
-### NODES CREATION ###
+# ---------------------------------------------------------------------------- #
+#                                NODES CREATION                                #
+# ---------------------------------------------------------------------------- #
 
 @njit
 def randomNodes(shape : tuple[int], scale : int) -> np.ndarray:
@@ -34,14 +34,16 @@ def pertubate(nodes : np.ndarray) -> np.ndarray:
             nodes[i, j] = np.round(nodes[i, j]) * 2 + 1
     return nodes
     
-pertubate(nodes)
-print(nodes)
+# pertubate(nodes)
+# print(nodes)
 
 
-##################################################################
-### QUADTREE ###
 
-### TREE NODES ###
+# ---------------------------------------------------------------------------- #
+#                                   QUADTREE                                   #
+# ---------------------------------------------------------------------------- #
+
+# -------------------------------- TREE NODES -------------------------------- #
 PARENT = 0
 ACTIVE = 1
 LEVEL = 2
@@ -51,21 +53,8 @@ AABB = np.array((8, 9, 10))
 VERTEX = 11
 
 nodes_count = len(nodes)
-tree = np.full((1000, VERTEX + 1), NULL, dtype=np.int32)
+tree = np.full((500, VERTEX + 1), NULL, dtype=np.int32)
 tree_bound = 0
-
-
-### PORTAL INDEX ###
-M = 1
-POSITION = np.array((0, 1))
-STATUS = 2
-
-### PORTALS STATUS ###
-IN = 1
-OUT = -1
-UNUSED = 0
-
-# portal_list = np.full((), NULL)
 
 
 @njit
@@ -91,14 +80,12 @@ def divide_aabb(aabb):
     startx, starty, box_size = aabb
     box_size //= 2
 
-    topleft_aabb = np.array((startx, starty, box_size))
-    topright_aabb =  np.array((startx + box_size, starty, box_size))
-    botleft_aabb = np.array((startx, starty + box_size, box_size))
-    botright_aabb =  np.array((startx + box_size, starty + box_size, box_size))
+    botleft_aabb = np.array((startx, starty, box_size))
+    topleft_aabb =  np.array((startx + box_size, starty, box_size))
+    botright_aabb = np.array((startx, starty + box_size, box_size))
+    topright_aabb =  np.array((startx + box_size, starty + box_size, box_size))
 
-    return (topleft_aabb, topright_aabb, botleft_aabb, botright_aabb)
-
-# print(divide_aabb((1, 1, 8)))
+    return (botleft_aabb, topleft_aabb, botright_aabb, topright_aabb)
 
 
 @njit
@@ -111,10 +98,20 @@ def is_inside_aabb(p, aabb, inclusive=True):
         return np.all(aabb_start <= p) and np.all(p <= aabb_end)
     else:
         return np.all(aabb_start < p) and np.all(p < aabb_end)
+    
 
 # point = np.array((0, 1))
 # aabb = (0, 0, 2)
 # print(is_inside_aabb(point, aabb, inclusive=True))
+
+@njit
+def is_on_edge_aabb(p, aabb):
+    return is_inside_aabb(p, aabb, inclusive=True) \
+            and not is_inside_aabb(p, aabb, inclusive=False)
+
+# aabb = np.array((0, 0, 8))
+# p = np.array((1, 1))
+# print(f"is on edge: {is_on_edge_aabb(p, aabb)}")
 
 
 @njit
@@ -160,7 +157,7 @@ def build_tree(tree, node_idx, aabb, vertices, vertices_idx):
         print(f"tree node: {tree[node_idx]}")
         print(f"")
     
-    
+    tree[node_idx][ACTIVE] = TRUE
     tree[node_idx][AABB] = aabb
     tree[node_idx][VERTEX_COUNT] = len(vertices_idx)
 
@@ -195,9 +192,28 @@ def build_tree(tree, node_idx, aabb, vertices, vertices_idx):
 # build_tree(tree, 0, (0, 0, bound), vertices, vert_idx)
 # print(tree[:4**3])
 
+@njit
+def print_tree(tree):
+    for i, node in enumerate(tree):
+        if node[ACTIVE] != NULL:
+            print(node)
+        
 
-##################################################################
-### PORTALIZATION ###
+
+# ---------------------------------------------------------------------------- #
+#                                 PORTALIZATION                                #
+# ---------------------------------------------------------------------------- #
+
+RIGHT = 1
+LEFT = 2
+DOWN = 3
+UP = 4
+
+CORNER_TL = 5
+CORNER_TR = 6
+CORNER_BL = 7
+CORNER_BR = 8
+
 
 @njit
 def get_portals(portallist, square):
@@ -209,12 +225,169 @@ def get_portals(portallist, square):
     return ret.reshape((length, np.int32(2)))
 
 
-portallist = np.array(((1, 3, 4, NULL, NULL), (2, 3, 4, 5, 6)))
+# portallist = np.array(((1, 3, 4, NULL, NULL), (2, 3, 4, 5, 6)))
 # port = get_portals(portallist, 0)
 # port[0, 1] = 0
 # print(portallist)
 # print(get_portals(portallist, 0))
 
+@njit
+def get_square_portals(square_idx, portalref):
+    length = portalref[square_idx][0]
+    if length == 0:
+        return None
+    
+    return portalref[square_idx][1 : length+1]
+
+# portalref = np.array(((1, 1, NULL, NULL), (3, 2, 3, 4)))
+# print(f"PORTALREF: {get_square_portals(0, portalref)}")
+
+
+@njit
+def calc_corner_portals(orientation_index, aabb):
+    startx, starty, bound = aabb
+    pos = np.array((startx, starty))
+
+    if orientation_index == CORNER_TL:
+        ret = np.add(pos, np.array((bound, 0)))
+        return ret
+    
+    if orientation_index == CORNER_TR:
+        ret = np.add(pos, np.array((bound, bound)))
+        return ret
+    
+    if orientation_index == CORNER_BL:
+        return pos
+    
+    if orientation_index == CORNER_BR:
+        ret = np.add(pos, np.array((0, bound)))
+        return ret
+
+
+@njit
+def calc_line_portals(orientation_index, aabb, num_portals):
+    startx, starty, bound = aabb
+    pos = np.array((startx, starty))
+    m = num_portals + 1
+    ret = None
+    increment = np.arange(1, m) * bound / m
+
+    if orientation_index == RIGHT: # right
+        pos = np.add(pos, np.array((0, bound)))
+        incr = np.vstack((increment, np.zeros(m - 1))).T
+        ret = np.add(pos, incr)
+        return ret
+
+    if orientation_index == LEFT: # left
+        pos = np.add(pos, np.array((0, 0)))
+        incr = np.vstack((increment, np.zeros(m - 1))).T
+        ret = np.add(pos, incr)
+        return ret
+
+    if orientation_index == DOWN: # down
+        pos = np.add(pos, np.array((0, 0)))
+        incr = np.vstack((np.zeros(m - 1), increment)).T
+        ret = np.add(pos, incr)
+        return ret
+    
+    if orientation_index == UP: # up
+        pos = np.add(pos, np.array((bound, 0)))
+        incr = np.vstack((np.zeros(m - 1), increment)).T
+        ret = np.add(pos, incr)
+        return ret
+
+
+# aabb = (0, 0, 8)
+# print(calc_line_portals(UP, aabb, 1))
+# print(calc_corner_portals(CORNER_TR, aabb))
+
+
+@njit
+def calc_inner_portals(aabb, num_portals):
+    inner_portals = np.empty((4*num_portals + 1, 2))
+
+    botleft, _, _, topright = divide_aabb(aabb)
+    inner_portals[:num_portals, :] = calc_line_portals(UP, botleft, num_portals)
+    inner_portals[num_portals : 2*num_portals, :] = calc_line_portals(RIGHT, botleft, num_portals)
+    inner_portals[2*num_portals : 3*num_portals, :] = calc_line_portals(LEFT, topright, num_portals)
+    inner_portals[3*num_portals : 4*num_portals, :] = calc_line_portals(DOWN, topright, num_portals)
+    inner_portals[4*num_portals] = calc_corner_portals(CORNER_TR, botleft)
+
+    return inner_portals
+
+
+# aabb = (0, 0, 16)
+# print(calc_inner_portals(aabb, 3))
+
+@njit
+def build_portallist(tree, portallist, num_portals):
+    """
+    """
+    portal_index = 0
+    for index, node in enumerate(tree):
+        if node[ACTIVE] == NULL:
+            continue
+        if node[VERTEX_COUNT] <= 1:
+            continue
+        
+        inner_portals = calc_inner_portals(node[AABB], num_portals)
+        index_end = len(inner_portals) + portal_index
+        portallist[portal_index : index_end] = inner_portals
+
+        if DEBUG:
+            print(f"index range: {index_end - portal_index}")
+            print(f"portal count: {len(inner_portals)}")
+            print("----------------------------------")
+
+
+
+# @njit
+def build_portalref(tree, portallist, portalref):
+    for index, node in enumerate(tree):
+        if node [ACTIVE] == NULL:
+            continue
+        aabb = node[AABB]
+        portals = np.full(len(portallist), NULL, dtype=np.int32)
+        idx = 0
+        for i, port in enumerate(portallist):
+            if is_on_edge_aabb(port, aabb):
+                portals[idx] = i
+                idx += 1
+        
+        if idx == 0:
+            continue
+        
+        print(f"FOUND PORTALS: {portals[:idx]}")
+        start_idx = portalref[index][0] if portalref[index][0] > 0 else 1
+        end_idx = start_idx + idx
+        print(start_idx, end_idx, sep=" ")
+        portalref[index][0] = end_idx
+        portalref[index][start_idx: end_idx] = portals[:idx].copy()
+
+        # portalref[index][0] = idx
+        # portalref[index][1: idx+1] = portals[:idx].copy()
+        print(f"PORTALREF: {portalref[index][1: end_idx]}")
+        
+
+vertices = np.array(((1, 1), (7, 7)))
+vert_idx = np.array(range(len(vertices)))
+bound = search_next_power(np.max(vertices), 2)
+portal_count = 3
+
+print(f"bound: {bound}")
+
+build_tree(tree, 0, (0, 0, bound), vertices, vert_idx)
+
+print_tree(tree)
+portalref = np.full((len(tree), 4* portal_count + 1), NULL, dtype=np.int32)
+portallist = np.full((30, 2), NULL, dtype=np.int32)
+portalref[:, 0] = 0
+
+build_portallist(tree, portallist, portal_count)
+build_portalref(tree, portallist, portalref)
+
+print(f"portallist: {portallist}")
+print(f"portalref: {portalref}")
 
 # from numba.typed import Sets
 
@@ -236,25 +409,21 @@ portallist = np.array(((1, 3, 4, NULL, NULL), (2, 3, 4, 5, 6)))
 # def intersect2D(a, b):
 #     return np.array([x for x in set(tuple(x) for x in a) & set(tuple(x) for x in b)])
 
-# @njit
-# def intersect2D(set1, set2):
-#     mask = np.array([False for i in set1], dtype=np.bool_)
-#     for i, elem in enumerate(set1):
-#         if elem in set2:
-#             mask[i] = True  
-
-#     return np.where(mask, set1)
-
-
+@njit
 def intersect2D(set1, set2):
+    mask = np.array([False for i in set1], dtype=np.bool_)
+    for i, elem in enumerate(set1):
+        for j in range(len(set2)):
+            if (elem == set2[j]).all():
+                mask[i] = True
+
+    idx = np.argwhere(mask == True).T[0]
+    return idx
 
 
-# def is_masks_compatible(portallist, s1, s2, s1_mask, s2_mask):
-#     return True
-
-s1 = np.array(((1, 0), (1, 1), (0, 1)))
-s2 = np.array(((1, 0), (1, 1), (1, 2)))
-print(intersect2D(s1, s2))
+# s1 = np.array(((1, 0), (2, 1), (1, 1)))
+# s2 = np.array(((1, 0), (1, 1), (1, 2)))
+# print(intersect2D(s1, s2))
 
 
 
@@ -277,8 +446,9 @@ def count_subset(num_elements):
 
 
 
-##################################################################
-### DYNAMIC PROGRAMMING ###
+# ---------------------------------------------------------------------------- #
+#                              DYNAMIC PROGRAMMING                             #
+# ---------------------------------------------------------------------------- #
 
 @njit
 def catalan(n):
@@ -326,19 +496,6 @@ print(calc_subproblem_space(6))
 
 
 # def get_pairing_index():
-    
-
-
-
-# @njit
-# def filt(arr, cond):
-#     a = arr[cond]
-#     return a + 1
-
-# a = np.array((1, 2, 3, 4, 5, 6, 7))
-
-# print(filt(a, np.array(CHILDREN)))
-# print(filt(a, ))
 
 
 # @njit
